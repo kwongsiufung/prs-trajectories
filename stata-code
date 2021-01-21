@@ -1,0 +1,576 @@
+*This is the syntax for running the PRS and trajectories analysis 
+
+/*
+This syntax assumes that you have already cleaned your data and you have your
+data in long format with subject ID, occasion, age, the depression scores and 
+the genetic data for example:
+
+ID		      occasion		        age				       dep				     PRS-score_standardised
+1			1			12					8						1.5
+1			2			14					6						1.5
+1			3			16					9						1.5
+2			1			13					2						-1
+2			2			14					5						-1
+2			3			16					3						-1
+3			1			13					9						3.1
+3			.			.					.						3.1
+3			3			16					5						3.1
+.
+.
+.
+
+*/
+
+*Analysis using a quartic slope with the PRS and DS trajectories
+
+*This analyses uses MLwiN calling the runmlwin command in stata but could be run
+*with mixed command
+
+*Set the MLwiN path
+global MLwiN_path C:\Program Files\MLwiN v3.04\mlwin.exe
+
+*MLwiN needs a constant to we generate that here
+gen cons=1
+
+*and then sort by age
+sort subject age
+
+*Centering the age variable and creating the polynomials
+sum age
+gen age16 = age-16.56267
+gen age16_2 = age16^2
+gen age16_3 = age16^3
+gen age16_4 = age16^4
+
+*Interacting the MDD score with the age polynomials
+gen MDD3_k_5e03_stdxage16 = age16 * MDD3_k_5e03_std
+gen MDD3_k_5e03_stdxage16_2 = age16_2 * MDD3_k_5e03_std
+gen MDD3_k_5e03_stdxage16_3 = age16_3 * MDD3_k_5e03_std
+gen MDD3_k_5e03_stdxage16_4 = age16_4 * MDD3_k_5e03_std
+
+**********************
+*Running the analysis*
+**********************
+
+*Check that the trajectory looks right
+runmlwin dep cons age16 age16_2 age16_3 age16_4, ///
+level2(subject: cons age16 age16_2 age16_3 age16_4) ///
+level1(age: cons) ///
+nopause
+ 
+*Create a predicted trajectory to have a look
+predict exampletest
+sort age
+line exampletest age
+sort subject age
+
+*Use this for getting more precise p values
+est tab, p(%12.10g)
+
+********************************************************************************
+********************************************************************************
+
+/*
+The following analyses runs the trajectories of depressive sympotms with the MD PRS
+on one occasion for brevity. The analyses can be repeated for different PRS thresholds
+MDD3_k_5e03_std represents the depression risk score here
+*/
+
+*PRS PT = 0.005
+runmlwin dep cons age16 age16_2 age16_3 age16_4 MDD3_k_5e03_std ///
+MDD3_k_5e03_stdxage16 MDD3_k_5e03_stdxage16_2 MDD3_k_5e03_stdxage16_3 MDD3_k_5e03_stdxage16_4 ///
+female pc1-pc10, ///
+level2(subject: cons age16 age16_2 age16_3 age16_4) ///
+level1(age: cons) ///
+nopause
+
+est tab, p(%12.10g)
+
+estimates save "mdd3_5e03.ster"
+
+********************************************************************************
+********************************************************************************
+
+*Create trajectory figure using the predictnl command
+estimates use "mdd3_5e03.ster"
+
+predictnl highest_mdd = ///
+  _b[cons] ///   
+  + _b[MDD3_k_5e03_std]*1 ///
+  + _b[age16]*age16 ///            
+  + _b[age16_2]*age16_2 ///            
+  + _b[age16_3]*age16_3 ///            
+  + _b[age16_4]*age16_4 ///
+  + _b[MDD3_k_5e03_stdxage16]*1*age16 ///
+  + _b[MDD3_k_5e03_stdxage16_2]*1*age16_2 ///  
+  + _b[MDD3_k_5e03_stdxage16_3]*1*age16_3 ///  
+  + _b[MDD3_k_5e03_stdxage16_4]*1*age16_4, se(mdd_highest_se)
+ 
+ predictnl normal_mdd = ///
+  _b[cons] ///   
+  + _b[MDD3_k_5e03_std]*0 ///
+  + _b[age16]*age16 ///            
+  + _b[age16_2]*age16_2 ///            
+  + _b[age16_3]*age16_3 ///            
+  + _b[age16_4]*age16_4 ///
+  + _b[MDD3_k_5e03_stdxage16]*0*age16 ///
+  + _b[MDD3_k_5e03_stdxage16_2]*0*age16_2 ///  
+  + _b[MDD3_k_5e03_stdxage16_3]*0*age16_3 ///  
+  + _b[MDD3_k_5e03_stdxage16_4]*0*age16_4, se(mdd_normal_se)
+ 
+ predictnl lowest_mdd = ///
+  _b[cons] ///   
+  + _b[MDD3_k_5e03_std]*-1 ///
+  + _b[age16]*age16 ///            
+  + _b[age16_2]*age16_2 ///            
+  + _b[age16_3]*age16_3 ///            
+  + _b[age16_4]*age16_4 ///
+  + _b[MDD3_k_5e03_stdxage16]*-1*age16 ///
+  + _b[MDD3_k_5e03_stdxage16_2]*-1*age16_2 ///  
+  + _b[MDD3_k_5e03_stdxage16_3]*-1*age16_3 ///  
+  + _b[MDD3_k_5e03_stdxage16_4]*-1*age16_4, se(mdd_lowest_se)
+
+*Creating the confidence intervals for each trajectory 
+generate highest_mdd_lo = highest_mdd - 1.96*mdd_highest_se
+generate highest_mdd_hi = highest_mdd + 1.96*mdd_highest_se
+
+generate normal_mdd_lo = normal_mdd - 1.96*mdd_normal_se
+generate normal_mdd_hi = normal_mdd + 1.96*mdd_normal_se 
+
+generate lowest_mdd_lo = lowest_mdd - 1.96*mdd_lowest_se
+generate lowest_mdd_hi = lowest_mdd + 1.96*mdd_lowest_se  
+
+*Plotting a simple graph
+twoway ///
+(line normal_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(solid) lcolor(black)) ///
+(line highest_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(solid) lcolor("253 231 37")) ///
+(line lowest_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(dash) lcolor("253 231 37")) ///  
+, ///
+graphregion(fcolor(white)) ///
+xlabel(10(2)24) ///
+xtitle("Age") ytitle("Depressive Symptoms (SMFQ)") ///
+legend(order(2 "MD PRS +1 SD"  3 "MD PRS -1 SD" 1 "MD PRS Population SD" )) 
+
+*Plotting a more complex graph
+twoway ///
+(rarea highest_mdd_lo highest_mdd_hi age if inrange(age16, -6.03352, 8.049814), sort color(gs10)) ///
+(rarea lowest_mdd_lo lowest_mdd_hi age if inrange(age16, -6.03352, 8.049814), sort color(gs10)) ///
+(line normal_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(solid) lcolor(black)) ///
+(line highest_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(solid) lcolor("253 231 37")) ///
+(line lowest_mdd age if inrange(age16, -6.03352, 8.049814), sort lpattern(dash) lcolor("253 231 37")) ///  
+, ///
+graphregion(fcolor(white)) ///
+xlabel(10(2)24) ///
+xtitle("Age") ytitle("Depressive Symptoms (SMFQ)") ///
+legend(order(4 "MD PRS +1 SD" 5 "MD PRS -1 SD" ///
+3 "MD PRS Population Average" 1 "95% CIs")) 
+
+********************************************************************************
+********************************************************************************
+
+*Comparing scores at the different ages for different trajectories
+
+/* 
+To calculate the predicted depressive symptoms score at a given age, you need 
+sub in the age you want to estimate at. Because we have centered age to be 16.53
+we subtract the age we want from the centered age and then put that age into the 
+equation. In this paper we did this at 9 difference occasions to match the cross
+sectional analysis
+We use the delta method (nlcom) to compare the estimates at each age
+*/
+
+*Age 10.63679
+di 10.63679 - 16.56267
+* -5.82539
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*-5.92588) ///
+		+(_b[age16_2]*((-5.92588)^2)) ///
+		+(_b[age16_3]*((-5.92588)^3)) ///
+		+(_b[age16_4]*((-5.92588)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(-5.92588)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(-5.92588)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(-5.92588)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(-5.92588)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*-5.92588) ///
+		+(_b[age16_2]*((-5.92588)^2)) ///
+		+(_b[age16_3]*((-5.92588)^3)) ///
+		+(_b[age16_4]*((-5.92588)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(-5.92588)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(-5.92588)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(-5.92588)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(-5.92588)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*-5.92588) ///
+		+(_b[age16_2]*((-5.92588)^2)) ///
+		+(_b[age16_3]*((-5.92588)^3)) ///
+		+(_b[age16_4]*((-5.92588)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(-5.92588)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(-5.92588)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(-5.92588)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(-5.92588)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 12.81
+di 12.80559 - 16.56267
+* -3.75708
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*-3.75708) ///
+		+(_b[age16_2]*((-3.75708)^2)) ///
+		+(_b[age16_3]*((-3.75708)^3)) ///
+		+(_b[age16_4]*((-3.75708)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(-3.75708)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(-3.75708)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(-3.75708)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(-3.75708)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*-3.75708) ///
+		+(_b[age16_2]*((-3.75708)^2)) ///
+		+(_b[age16_3]*((-3.75708)^3)) ///
+		+(_b[age16_4]*((-3.75708)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(-3.75708)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(-3.75708)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(-3.75708)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(-3.75708)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*-3.75708) ///
+		+(_b[age16_2]*((-3.75708)^2)) ///
+		+(_b[age16_3]*((-3.75708)^3)) ///
+		+(_b[age16_4]*((-3.75708)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(-3.75708)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(-3.75708)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(-3.75708)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(-3.75708)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 13.83
+di 13.83157 - 16.56267
+* -2.7311
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*-2.7311) ///
+		+(_b[age16_2]*((-2.7311)^2)) ///
+		+(_b[age16_3]*((-2.7311)^3)) ///
+		+(_b[age16_4]*((-2.7311)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(-2.7311)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(-2.7311)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(-2.7311)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(-2.7311)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*-2.7311) ///
+		+(_b[age16_2]*((-2.7311)^2)) ///
+		+(_b[age16_3]*((-2.7311)^3)) ///
+		+(_b[age16_4]*((-2.7311)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(-2.7311)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(-2.7311)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(-2.7311)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(-2.7311)^4) ///	
+		) ///
+(high: _b[cons] ///
+		+(_b[age16]*-2.7311) ///
+		+(_b[age16_2]*((-2.7311)^2)) ///
+		+(_b[age16_3]*((-2.7311)^3)) ///
+		+(_b[age16_4]*((-2.7311)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(-2.7311)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(-2.7311)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(-2.7311)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(-2.7311)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 16.68
+di 16.67815 - 16.56267
+* 0.11548
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*0.11548) ///
+		+(_b[age16_2]*((0.11548)^2)) ///
+		+(_b[age16_3]*((0.11548)^3)) ///
+		+(_b[age16_4]*((0.11548)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(0.11548)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(0.11548)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(0.11548)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(0.11548)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*0.11548) ///
+		+(_b[age16_2]*((0.11548)^2)) ///
+		+(_b[age16_3]*((0.11548)^3)) ///
+		+(_b[age16_4]*((0.11548)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(0.11548)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(0.11548)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(0.11548)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(0.11548)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*0.11548) ///
+		+(_b[age16_2]*((0.11548)^2)) ///
+		+(_b[age16_3]*((0.11548)^3)) ///
+		+(_b[age16_4]*((0.11548)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(0.11548)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(0.11548)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(0.11548)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(0.11548)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 17.82
+di 17.82191 - 16.56267
+* 1.25924
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*1.25924) ///
+		+(_b[age16_2]*((1.25924)^2)) ///
+		+(_b[age16_3]*((1.25924)^3)) ///
+		+(_b[age16_4]*((1.25924)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(1.25924)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(1.25924)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(1.25924)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(1.25924)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*1.25924) ///
+		+(_b[age16_2]*((1.25924)^2)) ///
+		+(_b[age16_3]*((1.25924)^3)) ///
+		+(_b[age16_4]*((1.25924)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(1.25924)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(1.25924)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(1.25924)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(1.25924)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*1.25924) ///
+		+(_b[age16_2]*((1.25924)^2)) ///
+		+(_b[age16_3]*((1.25924)^3)) ///
+		+(_b[age16_4]*((1.25924)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(1.25924)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(1.25924)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(1.25924)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(1.25924)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 18
+di 18.64181 - 16.56267
+* 2.07914
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*2.07914) ///
+		+(_b[age16_2]*((2.07914)^2)) ///
+		+(_b[age16_3]*((2.07914)^3)) ///
+		+(_b[age16_4]*((2.07914)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(2.07914)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(2.07914)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(2.07914)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(2.07914)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*2.07914) ///
+		+(_b[age16_2]*((2.07914)^2)) ///
+		+(_b[age16_3]*((2.07914)^3)) ///
+		+(_b[age16_4]*((2.07914)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(2.07914)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(2.07914)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(2.07914)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(2.07914)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*2.07914) ///
+		+(_b[age16_2]*((2.07914)^2)) ///
+		+(_b[age16_3]*((2.07914)^3)) ///
+		+(_b[age16_4]*((2.07914)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(2.07914)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(2.07914)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(2.07914)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(2.07914)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 21.95
+di 21.94661 - 16.56267
+* 5.38394
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*5.38394) ///
+		+(_b[age16_2]*((5.38394)^2)) ///
+		+(_b[age16_3]*((5.38394)^3)) ///
+		+(_b[age16_4]*((5.38394)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(5.38394)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(5.38394)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(5.38394)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(5.38394)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*5.38394) ///
+		+(_b[age16_2]*((5.38394)^2)) ///
+		+(_b[age16_3]*((5.38394)^3)) ///
+		+(_b[age16_4]*((5.38394)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(5.38394)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(5.38394)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(5.38394)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(5.38394)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*5.38394) ///
+		+(_b[age16_2]*((5.38394)^2)) ///
+		+(_b[age16_3]*((5.38394)^3)) ///
+		+(_b[age16_4]*((5.38394)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(5.38394)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(5.38394)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(5.38394)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(5.38394)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 22.88
+di 22.87633 - 16.56267
+* 6.31366
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*6.31366) ///
+		+(_b[age16_2]*((6.31366)^2)) ///
+		+(_b[age16_3]*((6.31366)^3)) ///
+		+(_b[age16_4]*((6.31366)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(6.31366)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(6.31366)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(6.31366)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(6.31366)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*6.31366) ///
+		+(_b[age16_2]*((6.31366)^2)) ///
+		+(_b[age16_3]*((6.31366)^3)) ///
+		+(_b[age16_4]*((6.31366)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(6.31366)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(6.31366)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(6.31366)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(6.31366)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*6.31366) ///
+		+(_b[age16_2]*((6.31366)^2)) ///
+		+(_b[age16_3]*((6.31366)^3)) ///
+		+(_b[age16_4]*((6.31366)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(6.31366)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(6.31366)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(6.31366)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(6.31366)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
+
+*Age 23.86
+di 23.885942 - 16.56267
+* 7.323272
+
+estimates use "mdd3_5e03.ster"
+
+nlcom ///
+(norm: _b[cons] ///
+		+(_b[age16]*7.323272) ///
+		+(_b[age16_2]*((7.323272)^2)) ///
+		+(_b[age16_3]*((7.323272)^3)) ///
+		+(_b[age16_4]*((7.323272)^4)) ///
+		+(_b[MDD3_k_5e03_std]*0) ///
+		+(_b[MDD3_k_5e03_stdxage16]*0*(7.323272)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*0*(7.323272)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*0*(7.323272)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*0*(7.323272)^4) ///	
+		) ///		
+(high: _b[cons] ///
+		+(_b[age16]*7.323272) ///
+		+(_b[age16_2]*((7.323272)^2)) ///
+		+(_b[age16_3]*((7.323272)^3)) ///
+		+(_b[age16_4]*((7.323272)^4)) ///
+		+(_b[MDD3_k_5e03_std]*1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*1*(7.323272)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*1*(7.323272)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*1*(7.323272)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*1*(7.323272)^4) ///	
+		) ///
+(low: _b[cons] ///
+		+(_b[age16]*7.323272) ///
+		+(_b[age16_2]*((7.323272)^2)) ///
+		+(_b[age16_3]*((7.323272)^3)) ///
+		+(_b[age16_4]*((7.323272)^4)) ///
+		+(_b[MDD3_k_5e03_std]*-1) ///
+		+(_b[MDD3_k_5e03_stdxage16]*-1*(7.323272)) ///
+		+(_b[MDD3_k_5e03_stdxage16_2]*-1*(7.323272)^2) /// 
+		+(_b[MDD3_k_5e03_stdxage16_3]*-1*(7.323272)^3) ///  
+		+(_b[MDD3_k_5e03_stdxage16_4]*-1*(7.323272)^4) ///	
+		) ///
+		, cformat(%9.2f) post
+nlcom (difference: _b[norm] - _b[high]), cformat(%9.2f) post
+est tab, p(%12.10g)
